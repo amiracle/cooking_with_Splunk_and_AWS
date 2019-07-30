@@ -1,0 +1,405 @@
+<form script="overview.js">
+  <label>Overview fix</label>
+  <fieldset submitButton="false">
+    <input type="multiselect" token="accountId" searchWhenChanged="true">
+      <label>Account ID</label>
+      <choice value="*">All</choice>
+      <populatingSearch fieldForValue="account_id" fieldForLabel="title">
+        <![CDATA[ |aclinputlookup all_account_ids | mvcombine delim=", " name | nomv name | eval title=account_id." (".name.")" ]]>
+      </populatingSearch>
+      <prefix> (</prefix>
+      <suffix>) </suffix>
+      <valuePrefix>aws_account_id="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+    </input>
+    <input type="multiselect" token="region" searchWhenChanged="true">
+      <label>Regions</label>
+      <choice value="*">All</choice>
+      <populatingSearch fieldForValue="region" fieldForLabel="label">
+        <![CDATA[ |inputlookup regions ]]>
+      </populatingSearch>
+      <prefix> (</prefix>
+      <suffix>) </suffix>
+      <valuePrefix>region="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+    </input>
+    <input id="awstags" token="tags"></input>
+    <input type="time" searchWhenChanged="true">
+      <label>Time Range</label>
+      <default>Last 7 days</default>
+    </input>
+  </fieldset>
+  <search id="baseInstanceSearch">
+    <query>
+            <![CDATA[
+                `aws-description-resource($accountId$, $region$, "ec2_instances")` $tags|tag2description$
+                | stats dc(id) as count by placement, instance_type, state
+                | rename placement as availability_zone
+            ]]>
+        </query>
+    <earliest>-1d</earliest>
+    <latest>now</latest>
+  </search>
+  <search id="baseVolumeSearch">
+    <query>
+            <![CDATA[
+                `aws-description-resource($accountId$, $region$, "ec2_volumes")` $tags|tag2description$
+                | stats dc(id) as count by status
+            ]]>
+        </query>
+    <earliest>-1d</earliest>
+    <latest>now</latest>
+  </search>
+  <search id="baseConfigChangeSearch">
+    <query>
+            <![CDATA[
+                `aws-config-notification($accountId$, $region$)` $tags|tag2notification$
+                | stats count by action
+            ]]>
+        </query>
+    <earliest>$earliest$</earliest>
+    <latest>$latest$</latest>
+  </search>
+  <row>
+    <panel>
+      <title>Configuration Changes</title>
+      <single>
+        <search base="baseConfigChangeSearch">
+          <query>
+                        where 'action'="created"
+                        | nadefault count
+                    </query>
+        </search>
+        <drilldown>
+          <link>kam_resource_activity?latest=$latest$&amp;earliest=$earliest$&amp;form.changeType=created&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="useColors">1</option>
+        <option name="colorBy">value</option>
+        <option name="colorMode">none</option>
+        <option name="rangeColors">["0x65a637","0x65a637"]</option>
+        <option name="rangeValues">[50]</option>
+        <option name="field">count</option>
+        <option name="underLabel">CREATES</option>
+      </single>
+      <single>
+        <search base="baseConfigChangeSearch">
+          <query>
+                        where 'action'="modified"
+                        | nadefault count
+                    </query>
+        </search>
+        <drilldown>
+          <link>kam_resource_activity?latest=$latest$&amp;earliest=$earliest$&amp;form.changeType=modified&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="useColors">1</option>
+        <option name="colorBy">value</option>
+        <option name="colorMode">none</option>
+        <option name="rangeColors">["0xf7bc38","0xf7bc38"]</option>
+        <option name="rangeValues">[50]</option>
+        <option name="field">count</option>
+        <option name="underLabel">UPDATES</option>
+      </single>
+      <single>
+        <search base="baseConfigChangeSearch">
+          <query>
+                        where 'action'="deleted"
+                        | nadefault count
+                    </query>
+        </search>
+        <drilldown>
+          <link>kam_resource_activity?latest=$latest$&amp;earliest=$earliest$&amp;form.changeType=deleted&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="useColors">1</option>
+        <option name="colorBy">value</option>
+        <option name="colorMode">none</option>
+        <option name="rangeColors">["0xd93f3c","0xd93f3c"]</option>
+        <option name="rangeValues">[50]</option>
+        <option name="field">count</option>
+        <option name="underLabel">DELETES</option>
+      </single>
+      <chart>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-config-notification($accountId$, $region$)` $tags|tag2notification$
+                            | rename action as "Change Type"
+                            | timechart count by "Change Type"
+                        ]]>
+                    </query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <drilldown>
+          <link>kam_resource_activity?latest=$latest$&amp;earliest=$earliest$&amp;form.changeType=$click.name2$&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.legend.placement">none</option>
+        <option name="charting.legend.masterLegend">null</option>
+        <option name="charting.axisTitleX.visibility">collapsed</option>
+        <option name="charting.axisTitleY.visibility">visible</option>
+        <option name="charting.axisTitleY2.visibility">visible</option>
+        <option name="charting.axisTitleX.text"></option>
+        <option name="charting.axisTitleY.text"></option>
+        <option name="charting.fieldColors">{CREATE:0x65a637,UPDATE:0xf7bc38,DELETE:0xd93f3c}</option>
+      </chart>
+    </panel>
+    <panel>
+      <title>Notable CloudTrail Activity by Origin</title>
+      <map>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-cloudtrail($accountId$, $region$)`
+                            | `cloudtrail_service("*", 1)`
+                            | iplocation sourceIPAddress
+                            | geostats latfield=lat longfield=lon count by eventName
+                        ]]>
+                    </query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="mapping.map.center">(42.879094,-97.381205)</option>
+        <option name="mapping.map.zoom">3</option>
+        <option name="height">300</option>
+      </map>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <title>Compute Instances</title>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-description-resource($accountId$, $region$, "vpcs")` $tags|tag2description$
+                            | stats dc(id) as count
+                            | nadefault count
+                        ]]>
+                    </query>
+          <earliest>-1d</earliest>
+          <latest>now</latest>
+        </search>
+        <drilldown>
+          <link>vpcs?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">VPCs</option>
+      </single>
+      <single>
+        <search base="baseInstanceSearch">
+          <query>
+                        <![CDATA[
+                            search state="running"
+                            | stats sum(count) as count
+                            | nadefault count
+                        ]]>
+                    </query>
+        </search>
+        <drilldown>
+          <link>instance_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">RUNNING INSTANCES</option>
+      </single>
+      <single>
+        <search base="baseInstanceSearch">
+          <query>
+                        <![CDATA[
+                            stats sum(count) as count
+                            | nadefault count
+                        ]]>
+                    </query>
+        </search>
+        <drilldown>
+          <link>instance_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">TOTAL INSTANCES</option>
+      </single>
+    </panel>
+    <panel id="storagePanel">
+      <title>Storage</title>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-description-resource($accountId$, $region$, "ec2_volumes")` $tags|tag2description$
+                            | stats dc(id) as count by status
+                            | where status="available"
+                            | nadefault count
+                        ]]>
+                    </query>
+          <earliest>-1d</earliest>
+          <latest>now</latest>
+        </search>
+        <drilldown>
+          <link>ebs_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">UNUSED EBS VOLUMES</option>
+        <option name="useColors">1</option>
+        <option name="colorBy">value</option>
+        <option name="colorMode">none</option>
+        <option name="rangeColors">["0x555","0xd93f3c"]</option>
+        <option name="rangeValues">[0]</option>
+      </single>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-description-resource($accountId$, $region$, "ec2_volumes")` $tags|tag2description$
+                            | stats sum(size) as size
+                            | eval size=size
+                            | nadefault size
+                        ]]>
+                    </query>
+          <earliest>-1d</earliest>
+          <latest>now</latest>
+        </search>
+        <drilldown>
+          <link>ebs_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$&amp;form.tags=$tags$</link>
+        </drilldown>
+        <option name="field">size</option>
+        <option name="underLabel">TOTAL EBS SIZE (GB)</option>
+      </single>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-cloudwatch-s3($accountId$, $region$)` metric_name=BucketSizeBytes
+                            | `aws-cloudwatch-dimension-rex("BucketName", "bucket")`
+                            | dedup bucket sortby -_time
+                            | stats sum(Maximum) as size
+                            | eval size=size/1024/1024/1024
+                            | nadefault size
+                        ]]>
+                    </query>
+          <earliest>-7d</earliest>
+          <latest>now</latest>
+        </search>
+        <option name="field">size</option>
+        <option name="underLabel">S3 SIZE (GB)</option>
+        <drilldown>
+          <link target="_blank">
+            <![CDATA[
+                            search?q=search `aws-cloudwatch-s3($accountId$, $region$)` metric_name=BucketSizeBytes
+                            | dedup metric_dimensions sortby -_time
+                            | eval size(GB)=round(Maximum/1024/1024/1024,2)
+                            | sort -Maximum
+                            | table metric_dimensions region size(GB)&latest=$latest$&earliest=$earliest$
+                        ]]>
+          </link>
+        </drilldown>
+      </single>
+    </panel>
+  </row>
+  <row>
+    <panel depends="$currency$">
+      <title>Billing</title>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-cloudwatch-billing($accountId$, $currency$)`
+                            | stats sum(Sum) as sum by _time LinkedAccountId metric_dimensions
+                            | `aws-cloudwatch-dimension-rex("ServiceName", "Service")`
+                            | eval day=strftime(_time, "%Y/%m/%d")
+                            | dedup day LinkedAccountId Service sortby -_time
+                            | `aws-accountid-to-name`
+                            | timechart span=1d sum(sum) by LinkedAccountId
+                            | addtotals
+                            | search Total!=""
+                        ]]>
+                    </query>
+          <earliest>@mon</earliest>
+          <latest>now</latest>
+        </search>
+        <drilldown>
+          <link>estimated_billing?form.accountId=$form.accountId$</link>
+        </drilldown>
+        <option name="field">sum</option>
+        <option name="underLabel">ESTIMATED COST ($currency|currency2Symbol$) - MONTH TO DATE</option>
+      </single>
+    </panel>
+    <panel>
+      <title>ELB</title>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-description-elb($accountId$, $region$)`
+                            | stats dc(uniq_id) as count
+                            | nadefault count
+                        ]]>
+                    </query>
+          <earliest>-1d</earliest>
+          <latest>now</latest>
+        </search>
+        <drilldown>
+          <link>elb_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">ELBs</option>
+      </single>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            `aws-cloudwatch-elb($accountId$, $region$)` metric_name=RequestCount
+                            | stats sum(Sum) as count
+                            | nadefault count
+                        ]]>
+                    </query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <drilldown>
+          <link>elb_usage?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$&amp;regions=$form.region$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">REQUESTS</option>
+      </single>
+    </panel>
+    <panel>
+      <title>CloudFront</title>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            | tstats dc(CloudFront_Access_Log.x_edge_request_id) as count FROM datamodel=CloudFront_Access_Log $accountId|account2CloudFrontDataModel$
+                            | nadefault count
+                        ]]>
+                    </query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <drilldown>
+          <link>cloudfront_access_logs?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$</link>
+        </drilldown>
+        <option name="field">count</option>
+        <option name="underLabel">REQUESTS</option>
+      </single>
+      <single>
+        <search>
+          <query>
+                        <![CDATA[
+                            | tstats sum(CloudFront_Access_Log.cs_bytes) as cs_bytes FROM datamodel=CloudFront_Access_Log $accountId|account2CloudFrontDataModel$
+                            | eval cs_bytes=cs_bytes/1024/1024
+                            | nadefault cs_bytes
+                        ]]>
+                    </query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <drilldown>
+          <link>cloudfront_access_logs?latest=$latest$&amp;earliest=$earliest$&amp;form.accountId=$form.accountId$</link>
+        </drilldown>
+        <option name="field">cs_bytes</option>
+        <option name="underLabel">TRAFFIC (MB)</option>
+      </single>
+    </panel>
+  </row>
+</form>

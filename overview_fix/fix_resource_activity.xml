@@ -1,0 +1,143 @@
+<form script="base_page.js">
+  <label>fix Resource Activity</label>
+  <description>aws:config change</description>
+  <fieldset submitButton="false">
+    <input type="multiselect" token="accountId" searchWhenChanged="true">
+      <label>Account ID</label>
+      <choice value="*">All</choice>
+      <populatingSearch fieldForValue="account_id" fieldForLabel="title">
+        <![CDATA[ |aclinputlookup all_account_ids | mvcombine delim=", " name | nomv name | eval title=account_id." (".name.")" ]]>
+      </populatingSearch>
+      <prefix> (</prefix>
+      <suffix>) </suffix>
+      <valuePrefix>aws_account_id="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+    </input>
+    <input type="multiselect" token="region" searchWhenChanged="true">
+      <label>Regions</label>
+      <choice value="*">All</choice>
+      <populatingSearch fieldForValue="region" fieldForLabel="label">
+        <![CDATA[ |inputlookup regions ]]>
+      </populatingSearch>
+      <prefix> (</prefix>
+      <suffix>) </suffix>
+      <valuePrefix>region="</valuePrefix>
+      <valueSuffix>"</valueSuffix>
+      <delimiter> OR </delimiter>
+    </input>
+    <input type="dropdown" searchWhenChanged="true" token="resourceType">
+      <label>Resource Type</label>
+      <choice value="*">All</choice>
+      <default>*</default>
+      <populatingSearch fieldForValue="resourceType" fieldForLabel="resourceType">
+        <![CDATA[
+                   `aws-config-notification-sourcetype`
+                   | stats count by resourceType
+                 ]]>
+      </populatingSearch>
+      <earliestTime>$earliest$</earliestTime>
+      <latestTime>$latest$</latestTime>
+    </input>
+    <input type="dropdown" searchWhenChanged="true" token="changeType">
+      <label>Change Type</label>
+      <default>*</default>
+      <choice value="*">All</choice>
+      <choice value="created">created</choice>
+      <choice value="updated">updated</choice>
+      <choice value="deleted">deleted</choice>
+      <choice value="modified">modified</choice>
+    </input>
+    <input id="awstags" token="tags"></input>
+    <input type="time" searchWhenChanged="true">
+      <label>Time Range</label>
+      <default>Last 7 days</default>
+    </input>
+  </fieldset>
+  <row>
+    <panel>
+      <table>
+        <title>Resources</title>
+        <search>
+          <query>`aws-config-notification($accountId$, $region$)` action=$changeType$ resourceType="$resourceType$" $tags|tag2notification$
+                        
+                        | eval {action}="1"
+                        | stats latest(tags.Name) as Name latest(resourceType) as "Resource Type" latest(aws_account_id) latest(region) as region latest(availabilityZone) as availabilityZone latest(action) as action
+                        latest(_time) as latest count(created) AS created count(updated) AS updated count(deleted) AS deleted by resourceId
+                        | eval latest=strftime(latest, "%F %T %z")
+                        | eval "Last Activity"=latest." | ".action
+                        | fields - action latest
+                        | lookup regions region OUTPUT label as region
+                        | fillnull value="N/A"
+                        | rename resourceId as "Resource ID", latest(aws_account_id) as "Account ID", count as Count, aws_account_id as "Account ID", region as Region, availabilityZone as "Availability Zone"</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="count">8</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">true</option>
+        <option name="wrap">false</option>
+        <fields>["Resource ID","Name","*"]</fields>
+      </table>
+    </panel>
+  </row>
+  <row>
+    <panel>
+      <chart>
+        <title>Changes Over Time</title>
+        <search>
+          <query>`aws-config-notification($accountId$, $region$)` resourceType="$resourceType$" action=$changeType$ $tags|tag2notification$| timechart count by action</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="charting.axisTitleX.text">Time</option>
+        <option name="charting.axisTitleY.text">Events</option>
+        <option name="charting.chart">column</option>
+        <option name="charting.chart.stackMode">stacked</option>
+        <option name="charting.fieldColors">{"created":0x65a637,"deleted":0xd85d3c,"updated":0xeab51c, "NONE":0x777777}</option>
+        <option name="charting.legend.masterLegend">null</option>
+        <option name="charting.legend.placement">bottom</option>
+        <option name="refresh.display">progressbar</option>
+      </chart>
+    </panel>
+    <panel>
+      <table>
+        <title>Changes by Resource Type</title>
+        <search>
+          <query>`aws-config-notification($accountId$, $region$)` resourceType="$resourceType$" action=$changeType$ $tags|tag2notification$
+                        | stats latest(_time) as ago count by resourceType
+                        | eventstats sum(count) as total | eval percent=100*count/total | fields - total
+                        | eval "Last Activity"=strftime(ago, "%F %T %z") | eval percent=tostring(round(percent, 0))+"%"
+                        | sort - count
+                        | `pretty_print(count)`
+                        | fields - ago
+                        | rename resourceType as "Resource Type", count as Count, percent as Percentage</query>
+          <earliest>$earliest$</earliest>
+          <latest>$latest$</latest>
+        </search>
+        <option name="count">8</option>
+        <option name="dataOverlayMode">none</option>
+        <option name="drilldown">row</option>
+        <option name="refresh.display">progressbar</option>
+        <option name="rowNumbers">false</option>
+        <option name="wrap">true</option>
+        <format field="trend" type="sparkline">
+          <option name="type">bar</option>
+          <option name="height">25</option>
+          <option name="barColor">#428bca</option>
+          <option name="barWidth">2px</option>
+        </format>
+        <fields>["Resource Type","Last Activity","*"]</fields>
+        <drilldown>
+          <link target="_blank">
+            <![CDATA[
+                        search?q=search `aws-config-notification($accountId$, $region$)`  resourceType="$row.Resource Type$" changeType=$changeType$ $tags|tag2notification$
+                    ]]>
+          </link>
+        </drilldown>
+      </table>
+    </panel>
+  </row>
+</form>
