@@ -1,0 +1,1 @@
+When using the SQS Based S3 method to collect AWS Config data, you will need to modify the overview.xml and resource_activity.xml dashboards. Here are the fixes needed to make sure they work. This contains the fix for the overview dashboard and the corresponding drilldown to properly
